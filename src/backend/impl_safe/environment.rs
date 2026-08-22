@@ -8,6 +8,8 @@
 // CONDITIONS OF ANY KIND, either express or implied. See the License for the
 // specific language governing permissions and limitations under the License.
 
+#[cfg(feature = "malloc-size-of")]
+use std::mem;
 use std::{
     borrow::Cow,
     collections::HashMap,
@@ -34,6 +36,10 @@ type DatabaseArena = Arena<Database>;
 type DatabaseNameMap = HashMap<Option<String>, DatabaseImpl>;
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
+#[cfg_attr(
+    feature = "malloc-size-of",
+    derive(malloc_size_of_derive::MallocSizeOf)
+)]
 pub struct EnvironmentBuilderImpl {
     flags: EnvironmentFlagsImpl,
     max_readers: Option<usize>,
@@ -119,6 +125,22 @@ pub(crate) struct EnvironmentDbs {
     pub(crate) name_map: DatabaseNameMap,
 }
 
+#[cfg(feature = "malloc-size-of")]
+impl malloc_size_of::MallocSizeOf for EnvironmentDbs {
+    fn size_of(&self, ops: &mut malloc_size_of::MallocSizeOfOps) -> usize {
+        let mut n = 0;
+
+        // Approximate allocations for the inner vec itself
+        let len = self.arena.len();
+        n += len * mem::size_of::<Database>();
+
+        for (_id, s) in self.arena.iter() {
+            n += s.size_of(ops)
+        }
+        n + self.name_map.size_of(ops)
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct EnvironmentDbsRefMut<'a> {
     pub(crate) arena: &'a mut DatabaseArena,
@@ -141,6 +163,20 @@ pub struct EnvironmentImpl {
     dbs: RwLock<EnvironmentDbs>,
     ro_txns: Arc<()>,
     rw_txns: Arc<()>,
+}
+
+#[cfg(feature = "malloc-size-of")]
+impl malloc_size_of::MallocSizeOf for EnvironmentImpl {
+    fn size_of(&self, ops: &mut malloc_size_of::MallocSizeOfOps) -> usize {
+        let mut n = 0;
+        n += self.path.size_of(ops);
+        n += self.max_dbs.size_of(ops);
+        if let Ok(dbs) = self.dbs.read() {
+            n += (*dbs).size_of(ops);
+        }
+
+        n
+    }
 }
 
 impl EnvironmentImpl {
